@@ -29,5 +29,8 @@ Thumbs.db
 *.tmp
 *.bak
 
-# Generated reports (stored in ~/)
-location_report.html
+# Data files (GPS tracks, CSVs, etc.)
+data/
+
+# Generated reports
+reports/

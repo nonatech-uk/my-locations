@@ -9,7 +9,7 @@ cd /home/stu/code/mylocation
 curl -fsS -m 10 --retry 5 "${HC_URL}/start" > /dev/null 2>&1
 
 # Run sync
-if ./venv/bin/python3 followmee_sync.py --daily >> /home/stu/code/mylocation/sync.log 2>&1; then
+if ./venv/bin/python3 gps/followmee_sync.py --daily >> /home/stu/code/mylocation/sync.log 2>&1; then
     # Success
     curl -fsS -m 10 --retry 5 "${HC_URL}" > /dev/null 2>&1
 else

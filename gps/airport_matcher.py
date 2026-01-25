@@ -1,11 +1,18 @@
 #!/usr/bin/env python3
-"""Match flight coordinates to nearby airports."""
+"""Match flight coordinates to nearby airports.
+
+Reads GPS-detected flights from /tmp/all_flights.txt and matches them to airports.
+Optionally writes matched flights to the database with source='gps-detected'.
+"""
 
 import csv
 import math
 import requests
 from io import StringIO
 from collections import defaultdict
+from datetime import datetime
+
+import db
 
 AIRPORTS_URL = "https://raw.githubusercontent.com/jpatokal/openflights/master/data/airports.dat"
 
@@ -121,7 +128,111 @@ def format_airport(airport, dist):
         return f"{airport['iata']} ({airport['city']})"
     return None
 
-def main():
+
+def save_flights_to_database(matched_flights, dry_run=False):
+    """
+    Save GPS-detected flights to the flights database table.
+
+    Args:
+        matched_flights: List of flight dicts with matched airport info
+        dry_run: If True, print what would be saved but don't insert
+    """
+    # Filter to only flights with both airports matched
+    valid_flights = [f for f in matched_flights if f.get('start_airport') and f.get('end_airport')]
+
+    if not valid_flights:
+        print("No flights with matched airports to save")
+        return
+
+    print(f"\nSaving {len(valid_flights)} GPS-detected flights to database...")
+
+    if dry_run:
+        print("(Dry run - not actually inserting)")
+        for f in valid_flights[:5]:
+            print(f"  {f['start_time'][:10]} {f['start_airport']['iata']}->{f['end_airport']['iata']} {f['distance_km']}km")
+        if len(valid_flights) > 5:
+            print(f"  ... and {len(valid_flights) - 5} more")
+        return
+
+    conn = db.get_connection()
+    cur = conn.cursor()
+
+    sql = """
+        INSERT INTO flights (
+            date, dep_airport, dep_airport_name, dep_icao,
+            arr_airport, arr_airport_name, arr_icao,
+            dep_time, arr_time, duration,
+            source, gps_matched,
+            dep_lat, dep_lon, arr_lat, arr_lon, distance_km
+        ) VALUES (
+            %(date)s, %(dep_airport)s, %(dep_airport_name)s, %(dep_icao)s,
+            %(arr_airport)s, %(arr_airport_name)s, %(arr_icao)s,
+            %(dep_time)s, %(arr_time)s, %(duration)s,
+            'gps-detected', TRUE,
+            %(dep_lat)s, %(dep_lon)s, %(arr_lat)s, %(arr_lon)s, %(distance_km)s
+        )
+        ON CONFLICT (date, dep_airport, arr_airport, flight_number) DO NOTHING
+    """
+
+    inserted = 0
+    skipped = 0
+
+    for flight in valid_flights:
+        start_airport = flight['start_airport']
+        end_airport = flight['end_airport']
+
+        # Parse times
+        try:
+            start_dt = datetime.fromisoformat(flight['start_time'].replace('Z', '+00:00'))
+            end_dt = datetime.fromisoformat(flight['end_time'].replace('Z', '+00:00'))
+            flight_date = start_dt.date()
+            dep_time = start_dt.time()
+            arr_time = end_dt.time()
+            duration_hours = flight['duration_h']
+            duration_str = f"{int(duration_hours)} hours {int((duration_hours % 1) * 60)} minutes"
+        except (ValueError, KeyError):
+            flight_date = flight['start_time'][:10]
+            dep_time = None
+            arr_time = None
+            duration_str = None
+
+        row = {
+            'date': flight_date,
+            'dep_airport': start_airport['iata'],
+            'dep_airport_name': start_airport.get('name'),
+            'dep_icao': start_airport.get('icao'),
+            'arr_airport': end_airport['iata'],
+            'arr_airport_name': end_airport.get('name'),
+            'arr_icao': end_airport.get('icao'),
+            'dep_time': dep_time,
+            'arr_time': arr_time,
+            'duration': duration_str,
+            'dep_lat': flight['start_lat'],
+            'dep_lon': flight['start_lon'],
+            'arr_lat': flight['end_lat'],
+            'arr_lon': flight['end_lon'],
+            'distance_km': flight['distance_km'],
+        }
+
+        try:
+            cur.execute(sql, row)
+            if cur.rowcount > 0:
+                inserted += 1
+            else:
+                skipped += 1
+        except Exception as e:
+            print(f"Error inserting {row['date']} {row['dep_airport']}->{row['arr_airport']}: {e}")
+            conn.rollback()
+            continue
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    print(f"Inserted {inserted} flights, skipped {skipped} duplicates")
+
+
+def main(save_to_db=True, dry_run=False):
     airports = load_airports()
     flights = load_flights()
 
@@ -229,5 +340,18 @@ def main():
 
     print(f"Raw data written to /tmp/all_flights_airports.txt")
 
+    # Save to database
+    if save_to_db:
+        save_flights_to_database(matched_flights, dry_run=dry_run)
+
+    return matched_flights
+
+
 if __name__ == '__main__':
-    main()
+    import argparse
+    parser = argparse.ArgumentParser(description='Match GPS flights to airports')
+    parser.add_argument('--no-db', action='store_true', help='Skip database insert')
+    parser.add_argument('--dry-run', action='store_true', help='Dry run (no inserts)')
+    args = parser.parse_args()
+
+    main(save_to_db=not args.no_db, dry_run=args.dry_run)

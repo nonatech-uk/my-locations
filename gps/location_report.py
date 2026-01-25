@@ -277,16 +277,13 @@ def main():
     print("Generating HTML report...")
     html = generate_html_report(places)
 
-    # Save HTML locally with proper encoding
-    report_path = '/home/stu/code/mylocation/location_report.html'
+    # Save HTML to reports directory
+    from pathlib import Path
+    reports_dir = Path(__file__).parent.parent / "reports"
+    report_path = reports_dir / "location_report.html"
     with open(report_path, 'w', encoding='utf-8') as f:
         f.write(html)
     print(f"Report saved to {report_path}")
-
-    # Also copy to home directory
-    import shutil
-    shutil.copy(report_path, '/home/stu/location_report.html')
-    print("Copied to /home/stu/location_report.html")
 
     # Email
     print("Sending email to stu@mees.st...")
