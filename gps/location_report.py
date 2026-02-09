@@ -177,6 +177,85 @@ def get_overnight_stays():
     return overnights
 
 
+def get_travel_days():
+    """Get days where first point is >100km from the last point of the previous day."""
+    conn = db.get_connection()
+    cur = conn.cursor()
+
+    cur.execute('''
+        WITH daily_bounds AS (
+            SELECT
+                DATE(ts) as day,
+                FIRST_VALUE(lat) OVER (PARTITION BY DATE(ts) ORDER BY ts) as first_lat,
+                FIRST_VALUE(lon) OVER (PARTITION BY DATE(ts) ORDER BY ts) as first_lon,
+                LAST_VALUE(lat) OVER (PARTITION BY DATE(ts) ORDER BY ts
+                    ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) as last_lat,
+                LAST_VALUE(lon) OVER (PARTITION BY DATE(ts) ORDER BY ts
+                    ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) as last_lon
+            FROM gps_points
+            WHERE speed_mph IS NULL OR speed_mph <= 5
+        )
+        SELECT DISTINCT day, first_lat, first_lon, last_lat, last_lon
+        FROM daily_bounds
+        ORDER BY day
+    ''')
+
+    rows = cur.fetchall()
+    conn.close()
+
+    travel_days = []
+    for i in range(len(rows) - 1):
+        day1, _, _, last_lat, last_lon = rows[i]
+        day2, first_lat, first_lon, _, _ = rows[i + 1]
+
+        if day2 - day1 != timedelta(days=1):
+            continue
+
+        dist = haversine_km(last_lat, last_lon, first_lat, first_lon)
+
+        if dist >= 100:
+            travel_days.append({
+                'date': day2,
+                'from_lat': last_lat,
+                'from_lon': last_lon,
+                'to_lat': first_lat,
+                'to_lon': first_lon,
+                'distance_km': dist,
+            })
+
+    return travel_days
+
+
+def geocode_travel_days(travel_days, cache):
+    """Reverse geocode travel day endpoints and return structured data."""
+    result = []
+    cached, new = 0, 0
+
+    for td in travel_days:
+        from_cache_key = f"{round(td['from_lat'], 2)},{round(td['from_lon'], 2)}"
+        from_was_cached = from_cache_key in cache
+        from_result = reverse_geocode_cached(td['from_lat'], td['from_lon'], cache)
+
+        to_cache_key = f"{round(td['to_lat'], 2)},{round(td['to_lon'], 2)}"
+        to_was_cached = to_cache_key in cache
+        to_result = reverse_geocode_cached(td['to_lat'], td['to_lon'], cache)
+
+        if from_result and to_result:
+            from_place, from_country = from_result
+            to_place, to_country = to_result
+            result.append({
+                'date': td['date'],
+                'from': f"{from_place}, {from_country}",
+                'to': f"{to_place}, {to_country}",
+                'distance_km': td['distance_km'],
+            })
+            cached += (1 if from_was_cached else 0) + (1 if to_was_cached else 0)
+            new += (0 if from_was_cached else 1) + (0 if to_was_cached else 1)
+
+    print(f"  Geocoding: {cached} cached, {new} new lookups")
+    return result
+
+
 def geocode_overnights(overnights, cache):
     """Reverse geocode overnight stays and aggregate by place."""
     # First, cluster overnights by rounded coordinates to reduce geocoding calls
@@ -260,7 +339,7 @@ def geocode_clusters(clusters, cache):
     return places
 
 
-def generate_html_report(places, overnight_data):
+def generate_html_report(places, overnight_data, travel_days_data=None):
     """Generate HTML report."""
     sorted_places = sorted(places.items(), key=lambda x: x[1]['days'], reverse=True)
 
@@ -329,6 +408,10 @@ def generate_html_report(places, overnight_data):
         <div class="stat-box">
             <div class="stat-number">{len(overnight_places)}</div>
             <div class="stat-label">Overnight Stays</div>
+        </div>
+        <div class="stat-box">
+            <div class="stat-number">{len(travel_days_data) if travel_days_data else 0}</div>
+            <div class="stat-label">Travel Days</div>
         </div>
         <div class="stat-box">
             <div class="stat-number">{max(years.keys()) - min(years.keys()) + 1}</div>
@@ -419,7 +502,33 @@ def generate_html_report(places, overnight_data):
 
     html += '''    </table>
     </div>
+'''
 
+    if travel_days_data:
+        # Group travel days by year
+        travel_by_year = defaultdict(list)
+        for td in travel_days_data:
+            travel_by_year[td['date'].year].append(td)
+
+        total_travel = len(travel_days_data)
+        html += f'''    <div class="section">
+    <h2>Travel Days</h2>
+    <p><em>{total_travel} days where first location was 100km+ from previous day's last location</em></p>
+'''
+
+        for year in sorted(travel_by_year.keys(), reverse=True):
+            days = travel_by_year[year]
+            html += f'    <h3>{year} ({len(days)} travel days)</h3>\n'
+            html += '    <table>\n'
+            html += '        <tr><th>Date</th><th>From</th><th>To</th><th>Distance</th></tr>\n'
+            for td in sorted(days, key=lambda x: x['date']):
+                html += (f'        <tr><td>{td["date"]}</td><td>{td["from"]}</td>'
+                         f'<td>{td["to"]}</td><td>{td["distance_km"]:,.0f} km</td></tr>\n')
+            html += '    </table>\n'
+
+        html += '    </div>\n'
+
+    html += '''
     <p style="color: #999; font-size: 0.8em; margin-top: 30px; text-align: center;">
         Generated from GPS data • Excludes transit (speed > 5 mph) • Clusters within ~500m combined
     </p>
@@ -479,11 +588,19 @@ def main():
     overnight_data = geocode_overnights(overnights, cache)
     print(f"Identified {len(overnight_data)} overnight locations")
 
+    print("Fetching travel days (>100km overnight moves)...")
+    travel_days = get_travel_days()
+    print(f"Found {len(travel_days)} travel days")
+
+    print("Reverse geocoding travel days...")
+    travel_days_data = geocode_travel_days(travel_days, cache)
+    print(f"Geocoded {len(travel_days_data)} travel days")
+
     save_geocode_cache(cache)
     print(f"Saved geocode cache ({len(cache)} entries)")
 
     print("Generating HTML report...")
-    html = generate_html_report(places, overnight_data)
+    html = generate_html_report(places, overnight_data, travel_days_data)
 
     # Save HTML to reports directory
     reports_dir = Path(__file__).parent.parent / "reports"
