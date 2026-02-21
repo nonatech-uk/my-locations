@@ -9,7 +9,7 @@ dist/
 build/
 
 # Credentials and secrets
-config.py
+.env
 
 # Logs
 *.log
