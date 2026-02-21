@@ -11,6 +11,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
+ENV PYTHONPATH=/app
+
 # Set up sync script and cron job - 5am daily
 RUN chmod +x /app/sync.sh \
     && echo "0 5 * * * /app/sync.sh" > /etc/cron.d/followmee-sync \
@@ -18,4 +20,4 @@ RUN chmod +x /app/sync.sh \
     && crontab /etc/cron.d/followmee-sync \
     && touch /var/log/sync.log
 
-CMD cron && tail -f /var/log/sync.log
+CMD ["/bin/sh", "-c", "cron && tail -f /var/log/sync.log"]
