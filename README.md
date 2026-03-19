@@ -30,18 +30,21 @@ This system aggregates personal location data from multiple sources:
 ## Project Structure
 
 ```
-~/code/mylocation/
-├── config.py               # Database credentials (gitignored)
-├── db.py                   # Database connection helper
+my-locations/
+├── config.py               # Reads DB credentials and API keys from .env
+├── db.py                   # Database connection helper + GPS point insertion
+├── queries.py              # Canonical read-only queries (for reuse by MCP server etc.)
+├── SCHEMA.md               # Full data model reference for external consumers
 ├── run_daily_sync.sh       # Cron wrapper for GPS sync (local)
 ├── sync.sh                 # Cron wrapper for GPS sync (Docker)
 ├── Dockerfile              # Docker container build
-├── .dockerignore            # Docker build exclusions
+├── .dockerignore           # Docker build exclusions
 ├── requirements.txt        # psycopg2-binary, requests, openpyxl
 │
 ├── gps/                    # GPS location tracking module
 │   ├── kml_loader.py       # One-time KML import script
 │   ├── followmee_sync.py   # Daily API sync script
+│   ├── placeme_import.py   # One-time Placeme location history import
 │   ├── location_report.py  # Location history reports
 │   ├── airport_matcher.py  # Match GPS points to airports
 │   └── visualize.py        # Interactive map generator
@@ -70,13 +73,13 @@ This system aggregates personal location data from multiple sources:
 │   ├── skiing/             # Ski Tracks exports
 │   └── ga/                 # Excel logbook
 │
-├── reports/                # Generated reports
+├── reports/                # Generated reports (gitignored)
 └── venv/                   # Python virtual environment
 ```
 
 ## Configuration
 
-`config.py` contains database credentials and FollowMee API keys (gitignored).
+Database credentials and API keys are stored in `.env` (gitignored). `config.py` reads them via `python-dotenv`.
 
 ## GPS Module
 
@@ -188,52 +191,16 @@ WHERE NOT EXISTS (SELECT 1 FROM gps_points WHERE ts::date = d::date);
 SELECT * FROM gps_points WHERE ST_DWithin(geom, ST_SetSRID(ST_MakePoint(-0.497, 51.208), 4326)::geography, 1000);
 ```
 
-## Database Schemas
+## Database Schema
 
-### gps_points
-```sql
-gps_points (
-    id              BIGINT PRIMARY KEY,
-    device_id       TEXT NOT NULL,
-    ts              TIMESTAMPTZ NOT NULL,
-    lat             DOUBLE PRECISION,
-    lon             DOUBLE PRECISION,
-    altitude_m      DOUBLE PRECISION,
-    speed_mph       DOUBLE PRECISION,
-    source_type     TEXT,           -- 'kml' or 'followmee-api'
-    geom            GEOGRAPHY        -- PostGIS point
-)
-```
+See **[SCHEMA.md](SCHEMA.md)** for the full data model reference, including:
+- All tables with column-by-column descriptions
+- Integer code mappings (seat_type, flight_class, etc.)
+- Invariants and deduplication rules
+- Canonical query patterns
+- Guidance for read-only consumers (e.g. MCP servers)
 
-### flights
-```sql
-flights (
-    id              SERIAL PRIMARY KEY,
-    date            DATE NOT NULL,
-    flight_number   TEXT,
-    dep_airport     TEXT NOT NULL,   -- IATA code
-    arr_airport     TEXT NOT NULL,
-    airline         TEXT,
-    aircraft_type   TEXT,
-    distance_km     INTEGER
-)
-```
-
-### skiing_days
-```sql
-skiing_days (
-    id              SERIAL PRIMARY KEY,
-    date            DATE NOT NULL UNIQUE,
-    location        TEXT,
-    vertical_down_m INTEGER,
-    max_speed_kmh   NUMERIC,
-    num_runs        INTEGER,
-    season          TEXT
-)
-```
-
-### ga_flights
-See `ga/README.md` for full schema.
+Reusable read-only queries are available in **[queries.py](queries.py)**.
 
 ## Reports
 
@@ -269,4 +236,4 @@ pip install psycopg2-binary requests openpyxl
 
 ---
 
-*Created: 2026-01-21 | Updated: 2026-02-21*
+*Created: 2026-01-21 | Updated: 2026-03-19*
