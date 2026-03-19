@@ -1,8 +1,26 @@
--- Flights table schema for mylocation system
--- Run: psql -h 10.8.0.8 -U mylocation -d mylocation -f schema.sql
-
--- Backup first (if not already done):
--- CREATE TABLE gps_points_backup_$(date +%Y%m%d) AS SELECT * FROM gps_points;
+-- Flights table: commercial airline flights as a passenger.
+--
+-- Each row is one flight segment. Data comes from two sources:
+--   - MyFlightDiary.com CSV exports (source='flightdiary') — has flight number,
+--     airline, seat, class info
+--   - GPS-detected journeys (source='gps-detected') — inferred from GPS speed
+--     and distance, matched to airports within 10km
+--   - Merged records (source='merged') — diary + GPS matched by same airports
+--     and date (+/- 1 day); keeps diary details, deletes GPS duplicate
+--
+-- Integer code columns:
+--   seat_type:     1=window, 2=middle, 3=aisle
+--   flight_class:  1=economy, 2=business, 3=first, 4=economy plus
+--   flight_reason: 1=leisure, 2=business
+--
+-- Airport codes are IATA (3-letter). Coordinates are for the airports, not
+-- the aircraft position.
+--
+-- Invariant: rows are deduplicated on (date, dep_airport, arr_airport, flight_number).
+-- The merge workflow may UPDATE source and DELETE gps-detected duplicates,
+-- but never modifies historical flight details.
+--
+-- Run: psql -h <host> -U mylocation -d mylocation -f schema.sql
 
 CREATE TABLE IF NOT EXISTS flights (
     id SERIAL PRIMARY KEY,

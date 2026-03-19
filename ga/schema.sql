@@ -1,5 +1,23 @@
--- GA Flying Logbook table schema
--- Run: psql -h 10.8.0.8 -U mylocation -d mylocation -f schema.sql
+-- GA Flying Logbook: general aviation flights where the owner was crew (not passenger).
+--
+-- Each row is one flight leg from a pilot's logbook. Imported from an Excel
+-- logbook spreadsheet. Hour columns are decimal hours (1.50 = 1h30m).
+--
+-- Key concepts:
+--   - SEP = Single Engine Piston, MEP = Multi Engine Piston
+--   - PIC = Pilot in Command, Dual = training with instructor
+--   - Total PIC hours = hours_sep_pic + hours_mep_pic
+--   - Total dual hours = hours_sep_dual + hours_mep_dual
+--   - Training flights have instructor IS NOT NULL and dual hours > 0
+--   - captain = instructor name on training flights, 'Self' on solo
+--   - hours_pic_3/dual_3/pic_4/dual_4 are additional logbook categories
+--     that may be empty for most entries
+--
+-- Airport codes are ICAO (4-letter, e.g. EGLL), NOT IATA as in the flights table.
+--
+-- Invariant: deduplicated on (date, registration, dep_airport, arr_airport, dep_time).
+--
+-- Run: psql -h <host> -U mylocation -d mylocation -f schema.sql
 
 CREATE TABLE IF NOT EXISTS ga_flights (
     id SERIAL PRIMARY KEY,

@@ -1,5 +1,16 @@
 #!/usr/bin/env python3
-"""Generate self-contained HTML visualization of location data."""
+"""
+Generate a self-contained HTML visualization of location data.
+
+Produces an interactive Leaflet map showing GPS location clusters, flight
+routes, and airport visits. Cluster detection uses PostGIS ST_ClusterDBSCAN
+(same algorithm as location_report.py but with a simpler threshold).
+
+Flight route and airport data is read from /tmp/all_flights_airports.txt,
+which is produced by airport_matcher.py.
+
+The core cluster query is also available in queries.py:get_location_clusters_simple().
+"""
 
 import json
 from collections import defaultdict

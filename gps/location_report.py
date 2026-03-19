@@ -1,5 +1,18 @@
 #!/usr/bin/env python3
-"""Generate comprehensive location history report and email it."""
+"""
+Generate a comprehensive location history report and email it.
+
+Analyses gps_points to identify:
+  - Location clusters (places visited, ranked by days spent there)
+  - Overnight stays (consecutive-day proximity < 1km)
+  - Travel days (consecutive-day distance >= 100km)
+
+Uses PostGIS ST_ClusterDBSCAN for spatial clustering and Nominatim for
+reverse geocoding (results cached in data/geocode_cache.json).
+
+The core query logic is also available in queries.py for reuse by other
+projects (e.g. an MCP server).
+"""
 
 import json
 import math

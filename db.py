@@ -1,8 +1,23 @@
+"""
+Database connection and GPS point insertion for the my-locations system.
+
+This module provides the shared database connection factory and the canonical
+insert function for GPS data. All other modules import `get_connection()` from
+here to obtain a psycopg2 connection.
+
+Tables accessed:
+    - gps_points (insert via insert_points, constraint management)
+
+The database is PostgreSQL with PostGIS. Connection parameters come from
+environment variables via config.py.
+"""
+
 import psycopg2
 from psycopg2.extras import execute_values
 import config
 
 def get_connection():
+    """Return a new psycopg2 connection to the my-locations PostgreSQL database."""
     return psycopg2.connect(
         host=config.DB_HOST,
         port=config.DB_PORT,
@@ -38,10 +53,22 @@ def ensure_unique_constraint():
 
 def insert_points(points):
     """
-    Insert GPS points with deduplication.
+    Bulk-insert GPS points into gps_points with deduplication.
 
-    points: list of dicts with keys matching gps_points columns
-    Returns: (inserted_count, skipped_count)
+    Uses psycopg2 execute_values for batch efficiency. Deduplication is
+    handled by the (device_id, ts) unique constraint with ON CONFLICT DO
+    NOTHING — duplicate points are silently skipped.
+
+    The PostGIS geometry column (geom) is computed from lat/lon at insert
+    time via ST_SetSRID(ST_MakePoint(lon, lat), 4326).
+
+    Args:
+        points: List of dicts, each with keys: device_id, device_name, ts,
+            lat, lon, altitude_m, altitude_ft, speed_mph, speed_kmh,
+            direction, accuracy_m, battery_pct, source_type.
+
+    Returns:
+        Tuple of (inserted_count, skipped_count).
     """
     if not points:
         return 0, 0
